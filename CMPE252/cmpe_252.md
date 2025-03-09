@@ -290,4 +290,193 @@ We cannot guarantee optimality with weighted A*, but we can guarantee that it wi
 - more time == more optimal solution
 - DP, Dijksta, and A* are not anytime algorithms
 
+## Dynamic Programming
 
+**optimal sub-structure** : property of a problem that allows it to be broken down into smaller subproblems which can be solved optimally to find the optimal solution
+
+**Claim** :
+
+If $ABE$ is the optimal path from $A$ to $E$, then $be$ is the optimal path from $B$ to $E$
+
+**Proof by Contradiction** : 
+
+1. Assumptions :
+    - $ABE$ is **optimal path**
+    - $BE$ is **not optimal**, thus there exists a shorter path $BXE$ such that :
+$$d(BXE) < d(BE)$$
+
+2. Proof :
+
+    - Since $ABE$ consists of the subpath $BE$, we can replace $BE$ with $BXE$ to get the new theoretical optimal path $ABXE$
+    - The total length of the new path will be :
+        $$d(AB) + d{BXE}$$
+    - Since we assumed that $d(BXE) < d(BE)$, this implies :
+        $$d(AB) + d(BXE) < d(AB) + d(BE)$$
+    - This means that for $BXE$ to be the optimal path from $B$ to $E$, the shortest path from $A$ to $E$ is $ABXE$ which contradicts our original assumption that $ABE$ is the optimal path
+
+---
+
+**Implementing Dynamic Programming** :
+
+1. Assumptions :
+    - $J^*_{cf}$, $J^*_{df}$ , and $J^*_{ef}$ represent the known shortest paths from nodes $c$, $d$, and $e$ to $f$
+
+2. Problem : We want the optimal path from $b$ to $f$ where $b$ has a path to $c$, $d$, and $e$ with costs $J^*_{bc}$, $J^*_{bd}$ , and $J^*_{be}$ respectively
+
+3. Optimal Substructure Property :
+    - The optimal path cost from $b$ to $f$ :
+      $$J^*_{bf} = min(J_{bc} + J^*_{cf}, J_{bd} + J^*_{df}, J_{be} + J^*_{ef})$$
+
+4. Process 3 can be repeated into previous nodes before $b$
+
+---
+
+Dynamic programming is meant to reflect multistage planning over a single static choice
+
+**memorization** : recording solutions of sub-problems (a memo)
+
+**Bellman equation** : fundamental recursive equation describing how to break a problem into smaller sub-problems and solving it recursively
+
+$$V(x_i) = \min_{x_j in N(x_i)}\{C(x_i,x_j) + V(x_j)\}$$
+$$V(x_G) = 0$$
+
+- $C(x_i, x_j)$ : cost of edge from $x_i$ to $x_j$
+  - if no edge then $C(x_i, x_j) = inf$
+- $V(x_i)$ : cost to go from x_i to x_G
+  - **value function** : the minimum cost to reach the goal node from any node
+- $N(x_i)$ : vertices that are outgoing neighbors of $x_i$
+
+---
+
+**Using Bellman Equation** :
+
+1. Assume 
+    - **Nodes** : $x_i \in \{ A, B, C, D, G \}$
+    - **Edges** :
+      - $C(A, B) = 1$
+      - $C(A, C) = 4$
+      - $C(B, C) = 2$
+      - $C(B, D) = 5$
+      - $C(C, D) = 1$
+      - $C(D, G) = 3$
+    - **Goal Node** : $ x_G = G $, so $ V(G) = 0 $.
+
+2. We recursively compute the value function $V(x_i)$ for each node.
+    - $V(D)$
+      $$V(D) = \min_{x_j \in N(D)} \{ C(D, x_j) + V(x_j) \}$$
+      $$V(D) = C(D, G) + V(G) = 3 + 0 = 3$$
+    - $V(C)$
+      $$V(C) = \min_{x_j \in N(C)} \{ C(C, x_j) + V(x_j) \}$$
+      $$V(C) = C(C, D) + V(D) = 1 + 3 = 4$$
+    - $V(B)$
+      $$V(B) = \min_{x_j \in N(B)} \{ C(B, x_j) + V(x_j) \}$$
+      $$V(B) = \min \{ C(B, C) + V(C), C(B, D) + V(D) \}$$
+      $$V(B) = \min \{ 2 + 4, 5 + 3 \} = \min \{ 6, 8 \} = 6$$
+    - $V(A)$
+      $$V(A) = \min_{x_j \in N(A)} \{ C(A, x_j) + V(x_j) \}$$
+      $$V(A) = \min \{ C(A, B) + V(B), C(A, C) + V(C) \}$$
+      $$V(A) = \min \{ 1 + 6, 4 + 4 \} = \min \{ 7, 8 \} = 7$$
+
+3. Results
+    - $V(G) = 0$
+    - $V(D) = 3$
+    - $V(C) = 4$
+    - $V(B) = 6$
+    - $V(A) = 7$
+
+Through the results, we know the **shortest path** is $ABCDG$
+
+---
+
+Computational cost of value function : 
+
+- $|V|$ : number of nodes in the graph
+- $\Delta$ : maximum degree of a vertex (maximum outgoing edges)
+
+... thus :
+
+- $|V| x |V|$ entries in the table
+- comparisons per entry : $|V|^2\Delta$ 
+- operations : $|V|^3$
+
+_Ex_ : a d-dimensional grid will lead to a $n^{3d}$ complexity
+
+## Linear/Integer Programming
+
+Finding the optimal solution to a linear problem with constraints on inequality and equality
+
+- Integers will only have integer values
+- Linear can be any real number
+
+---
+
+**Miller-Tucker-Zemlin (MTZ) ILP** : formulation of the traveling salesperson problem
+
+1. Objective : minimize the total travel cost $c_{ij}$
+
+  $$\min\sum^{n}_{i=0}\sum^{n}_{j≠0}c_{ij}x_{ij}$$
+
+2. Constraints
+    - Binary : $x_{ij}$ has to be between 0,1
+      $$0 ≤ x_{ij} ≤ 1 \qquad i,j = 0, ..., n$$
+    - Flow : each city is to be only visited once
+      $$\sum^{n}_{i=0,i≠j}x_{ij} = 1 \qquad j = 0, ..., n$$ 
+      $$\sum^{n}_{j=0,j≠i}x_{ij} = 1 \qquad i = 0, ..., n$$ 
+    - MTZ : ensures no sub-tours (there will only be one single loop)
+      $$u_i \in \Z \qquad i = 0, ..., n$$
+      $$u_i - u_j + nx_{ij} ≤ n - 1 \qquad 1 ≤ i ≠ j ≤ n$$
+
+---
+
+MTZ is for efficient for small problems, but scales poorly for large $n$
+
+**approximates solution** : solution to an optimization problem that is "good enough" within a given bound
+
+**approximation ratio** : how close an approximate solution is to the optimal solution
+
+$$Approximation\,Ratio = \frac{Cost\,of\,Approximate\,Solution}{Cost\,of\,Optimal\,Solution}$$
+
+- $Ratio = 1$ : optimal solution
+
+Assume 
+
+- $P$ : approximates solution
+- $P^*$ : optimal solution
+- $\alpha$ : approximation ratio
+
+... then $cost(P) \le \alpha * cost(P^*)$
+
+- $2\alpha$ : if the true solution is 100 miles, we will guarantee an approximate solution with cost at most 200 miles
+
+---
+
+**MST-based Approximation Algorithm for TSP**
+
+Leveraging MST to find a suboptimal but reasonably good solution to the computationally expensive TSP solution
+
+1. Construct an MST using Prim's or Kruskal's algorithm
+```
+ (A)
+  |
+  2
+  |
+ (B)
+  |
+  4
+  |
+ (C) -- 3 -- (E) 
+  |
+  3
+  |
+ (D)
+```
+
+2. Perform depth-first search (DFS) on the MST
+    - Build up a path as you visit nodes in the MST
+    - List nodes visited in order (allow revisit)
+$$A,B,C,D,C,E,C,B,A$$
+
+3. Skip vertices already visited
+    - Use edges not included in MST when skipping
+
+---
