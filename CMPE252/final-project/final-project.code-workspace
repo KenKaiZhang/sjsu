@@ -1,0 +1,10 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "remote.containers.devcontainerPath": ".devcontainer/devcontainer.json"
+    }
+}

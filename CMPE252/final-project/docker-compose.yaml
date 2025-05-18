@@ -1,0 +1,17 @@
+services:
+    final-project-env:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        image: final-project:latest
+        volumes:
+            - .:/workspace
+            - "/c/Users/Ken Zhang/ModelPlayground/Datasets:/workspace/data"
+        tty: true
+        stdin_open: true
+        shm_size: "8gb"
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - capabilities: [gpu]

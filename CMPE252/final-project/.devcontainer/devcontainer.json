@@ -1,0 +1,11 @@
+{
+  "name": "Final Project Env",
+  "dockerComposeFile": "../docker-compose.yaml",
+  "service": "final-project-env",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"]
+    }
+  }
+}
