@@ -3,6 +3,7 @@ FROM nvidia/cuda:11.8.0-base-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV PYTHONPATH=/workspace/src
 
 # Install dependencies and Python 3.12
 RUN apt-get update && apt-get install -y \

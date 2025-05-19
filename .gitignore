@@ -1,1 +1,6 @@
 venv/
+
+__pycache__/
+*.py[cod]
+
+/CMPE252/final-project/preprocessed/

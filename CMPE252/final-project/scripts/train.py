@@ -6,9 +6,9 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.models.simplemodel import SimpleModel
-from src.datasets.semantickitti_dataset import SemanticKITTIDataset
-from src.constants import PREPROCESSED_DIR, TRAIN_SEQUENCES, SAVED_MODELS_DIR
 from src.utils.train import collate_fn, discriminative_loss
+from src.constants import PREPROCESSED_DIR, TRAIN_SEQUENCES, SAVED_MODELS_DIR
+from src.datasets.semantickitti_dataset import SemanticKITTIPreprocessedDataset
 
 BATCH_SIZE = 4
 NUM_EPOCHS = 10
@@ -20,7 +20,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"--> Using device: {device}")
 
 # Loading dataset
-dataset = SemanticKITTIDataset(PREPROCESSED_DIR, TRAIN_SEQUENCES)
+dataset = SemanticKITTIPreprocessedDataset(PREPROCESSED_DIR, TRAIN_SEQUENCES)
 dataloader = DataLoader(
     dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, collate_fn=collate_fn
 )
@@ -40,7 +40,7 @@ model.train()
 semantic_criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore background class
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-model_folder = os.path.join(PREPROCESSED_DIR, "simplemodel")
+model_folder = os.path.join(SAVED_MODELS_DIR, "simplemodel")
 checkpoint_folder = os.path.join(model_folder, "checkpoints")
 os.makedirs(checkpoint_folder, exist_ok=True)
 

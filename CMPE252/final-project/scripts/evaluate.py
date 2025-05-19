@@ -1,214 +1,117 @@
 import os
 import torch
 import numpy as np
-import open3d as o3d
+from tqdm import tqdm
 from torch.utils.data import DataLoader
-from sklearn.cluster import DBSCAN
-from scipy.optimize import linear_sum_assignment
+from sklearn.metrics import confusion_matrix
 
-from src.datasets import semantickitti_dataset
-from src.models import SimpleModel
-from src.utils import compute_iou, collate_fn
+from src.utils.evaluate import *
+from src.utils.train import collate_fn
+from src.models.simplemodel import SimpleModel
+from src.utils.visualize import visualize_point_cloud
+from src.datasets.semantickitti_dataset import SemanticKITTIDataset
 from src.constants import (
-    SEMANTIC_KITTI_COLORS,
     SEMANTIC_KITTI_ID_TO_INDEX,
-    DATASET_DIR,
     SAVED_MODELS_DIR,
+    DATASET_DIR,
+    VAL_SEQUENCES,
 )
+
+BATCH_SIZE = 4
+INSTANCE_DIM = 32
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"--> Using device: {device}")
+print(f"--> Using {device}")
 
-print("\n--> Preparing validation dataset")
-val_sequence = ["08"]
-val_files = []
-for seq in val_sequence:
-    seq_path = os.path.join(DATASET_DIR, "sequences", seq, "velodyne")
-    scans = sorted(os.listdir(seq_path))
-    val_files.extend(
-        [
-            (
-                os.path.join(seq_path, scan),
-                os.path.join(seq_path, "../labels", scan.replace(".bin", ".label")),
-            )
-            for scan in scans
-        ]
-    )
+num_classes = len(SEMANTIC_KITTI_ID_TO_INDEX)
+model_path = os.path.join(SAVED_MODELS_DIR, "simplemodel", "simplemodel.pth")
 
-val_dataset = semantickitti_dataset(val_files, augment=False)
+print(f"\n--> Loading model from {model_path}")
+model = SimpleModel(instance_embedding_dim=INSTANCE_DIM).to(device)
+model.load_state_dict(torch.load(model_path, map_location=device))
+
+print(f"\n--> Loading validation dataset")
+val_dataset = SemanticKITTIDataset(DATASET_DIR, VAL_SEQUENCES)
 val_loader = DataLoader(
     val_dataset,
-    batch_size=4,
+    batch_size=BATCH_SIZE,
     shuffle=False,
+    num_workers=4,
     collate_fn=collate_fn,
-    num_workers=8,
-    pin_memory=True,
 )
 
-
-# Function to compute instance AP
-def compute_instance_ap(pred_clusters, gt_instances):
-    pred_clusters = pred_clusters.astype(np.int32)
-    gt_instances = gt_instances.astype(np.int32)
-    unique_pred = np.unique(pred_clusters[pred_clusters != -1])
-    unique_gt = np.unique(gt_instances[gt_instances != 0])
-
-    if len(unique_pred) == 0 or len(unique_gt) == 0:
-        return 0.0
-
-    # Compute IoU between predicted and ground truth instances
-    iou_matrix = np.zeros((len(unique_pred), len(unique_gt)))
-    for i, pred_id in enumerate(unique_pred):
-        for j, gt_id in enumerate(unique_gt):
-            pred_mask = pred_clusters == pred_id
-            gt_mask = gt_instances == gt_id
-            intersection = np.sum(pred_mask & gt_mask)
-            union = np.sum(pred_mask | gt_mask)
-            iou_matrix[i, j] = intersection / union if union > 0 else 0.0
-
-    # Hungarian matching
-    row_ind, col_ind = linear_sum_assignment(-iou_matrix)
-
-    # Compute AP
-    ious = iou_matrix[row_ind, col_ind]
-    ap = np.mean(ious > 0.5)  # Threshold IoU > 0.5 for a true positive
-    return ap
-
-
-# Lists to store metrics and sample data
-iou_scores = []
-pixel_acc_scores = []
-instance_ap_scores = []
-sample_data = []
-
-print("\n--> Evaluating model")
-model = SimpleModel(instance_embedding_dim=32).to(device)
-model.load_state_dict(torch.load(SAVED_MODELS_DIR))
+print("\n--> Validation start")
 model.eval()
-print(f"Loaded saved model from {SAVED_MODELS_DIR}")
+conf_matrix = np.zeros((num_classes, num_classes), dtype=np.int64)
+total_pq, total_sq, total_rq = 0.0, 0.0, 0.0
+num_samples = 0
+sample_data = None
 
-for batch_idx, batch in enumerate(val_loader):
-    for sample_idx, (points, semantic_labels, instance_labels) in enumerate(batch):
-        points = points.unsqueeze(0).to(device)
-        semantic_labels = semantic_labels.to(device)
-        instance_labels = instance_labels.to(device)
+with torch.no_grad():
+    for i, batch in enumerate(tqdm(val_loader, desc="Evaluating")):
+        points = batch["points"].to(device)  # Shape: (batch_size, max_points, 4)
+        semantic_gt = batch["semantic_labels"].to(
+            device
+        )  # Shape: (batch_size, max_points)
+        instance_gt = batch["instance_labels"].to(
+            device
+        )  # Shape: (batch_size, max_points)
+        masks = batch["masks"].to(device)  # Shape: (batch_size, max_points)
 
-        # Model prediction
-        with torch.no_grad():
-            semantic_pred, instance_pred = model(points)
-            pred_labels = torch.argmax(semantic_pred, dim=2).squeeze(0)
+        # Forward pass
+        semantic_pred, instance_pred = model(points)
+        semantic_pred = torch.argmax(
+            semantic_pred, dim=2
+        )  # Shape: (batch_size, max_points)
 
-        # Semantic evaluation
-        pred_labels_np = pred_labels.cpu().numpy()
-        semantic_labels_np = semantic_labels.cpu().numpy()
-        iou = compute_iou(pred_labels_np, semantic_labels_np)
-        iou_scores.append(iou)
+        # Update confusion matrix for mIoU
+        for b in range(points.shape[0]):
+            mask = masks[b]  # Valid points
+            pred = semantic_pred[b][mask].cpu().numpy()
+            gt = semantic_gt[b][mask].cpu().numpy()
+            if len(pred) > 0:  # Skip empty masks
+                conf_matrix += confusion_matrix(
+                    gt.flatten(), pred.flatten(), labels=np.arange(num_classes)
+                )
 
-        correct = (pred_labels == semantic_labels).sum().item()
-        total = semantic_labels.numel()
-        pixel_acc = correct / total
-        pixel_acc_scores.append(pixel_acc)
+        # Compute PQ for panoptic segmentation
+        for b in range(points.shape[0]):
+            mask = masks[b]
+            pred = semantic_pred[b][mask].cpu().numpy()
+            gt = semantic_gt[b][mask].cpu().numpy()
+            if len(pred) > 0:
+                sq, rq = compute_pq(pred, gt, num_classes)
+                total_sq += sq
+                total_rq += rq
+                total_pq += sq * rq
+                num_samples += 1
 
-        # Instance evaluation
-        instance_pred_np = instance_pred.squeeze(0).cpu().numpy()  # [N, 32]
-        instance_labels_np = instance_labels.cpu().numpy()  # [N]
-
-        # Cluster instance embeddings using DBSCAN
-        dbscan = DBSCAN(eps=0.5, min_samples=10, metric="euclidean")
-        pred_clusters = dbscan.fit_predict(instance_pred_np)
-
-        # Compute instance AP
-        instance_ap = compute_instance_ap(pred_clusters, instance_labels_np)
-        instance_ap_scores.append(instance_ap)
-
-        # Store sample data for visualization
-        sample_data.append(
-            {
-                "points": points.squeeze(0).cpu().numpy(),  # [N, 4]
-                "pred_labels": pred_labels_np,  # [N]
-                "pred_clusters": pred_clusters,  # [N]
-                "batch_idx": batch_idx,
-                "sample_idx": sample_idx,
-                "pixel_acc": pixel_acc,
-                "instance_ap": instance_ap,
+        # Save a sample for visualization
+        if sample_data is None:
+            mask = masks[0]
+            sample_data = {
+                "points": points[0][mask].cpu().numpy(),
+                "semantic_pred": semantic_pred[0][mask].cpu().numpy(),
+                "semantic_gt": semantic_gt[0][mask].cpu().numpy(),
             }
-        )
 
-# Compute semantic metrics
-iou_array = np.array(iou_scores)
-highest_iou = iou_array.max()
-mean_iou = iou_array.mean()
-lowest_iou = iou_array.min()
+# Compute final metrics
+mIoU = compute_iou(conf_matrix)
+avg_pq = total_pq / num_samples if num_samples > 0 else 0.0
+avg_sq = total_sq / num_samples if num_samples > 0 else 0.0
+avg_rq = total_rq / num_samples if num_samples > 0 else 0.0
 
-pixel_acc_array = np.array(pixel_acc_scores)
-highest_pixel_acc = pixel_acc_array.max()
-mean_pixel_acc = pixel_acc_array.mean()
-lowest_pixel_acc = pixel_acc_array.min()
+print(f"\n--> Validation complete. Displaying scores")
+print(f"Evaluation Results:")
+print(f"Mean IoU: {mIoU:.4f}")
+print(f"Panoptic Quality (PQ): {avg_pq:.4f}")
+print(f"Segmentation Quality (SQ): {avg_sq:.4f}")
+print(f"Recognition Quality (RQ): {avg_rq:.4f}")
 
-# Compute instance metrics
-instance_ap_array = np.array(instance_ap_scores)
-highest_instance_ap = instance_ap_array.max()
-mean_instance_ap = instance_ap_array.mean()
-lowest_instance_ap = instance_ap_array.min()
-
-# Find the index of the sample with the highest pixel accuracy
-highest_acc_idx = np.argmax(pixel_acc_array)
-
-print("\n--> Semantic IoU Scores:")
-print(f"  Highest IoU: {highest_iou:.4f}")
-print(f"  Mean IoU: {mean_iou:.4f}")
-print(f"  Lowest IoU: {lowest_iou:.4f}")
-
-print("\n--> Semantic Pixel Accuracy Scores:")
-print(f"  Highest Pixel Accuracy: {highest_pixel_acc:.4f}")
-print(f"  Mean Pixel Accuracy: {mean_pixel_acc:.4f}")
-print(f"  Lowest Pixel Accuracy: {lowest_pixel_acc:.4f}")
-
-print("\n--> Instance AP Scores:")
-print(f"  Highest Instance AP: {highest_instance_ap:.4f}")
-print(f"  Mean Instance AP: {mean_instance_ap:.4f}")
-print(f"  Lowest Instance AP: {lowest_instance_ap:.4f}")
-
-print("\n--> Rendering prediction for sample with highest pixel accuracy")
-best_sample = sample_data[highest_acc_idx]
-points = best_sample["points"][:, :3]  # [N, 3]
-pred_labels = best_sample["pred_labels"]  # [N]
-pred_clusters = best_sample["pred_clusters"]  # [N]
-batch_idx = best_sample["batch_idx"]
-sample_idx = best_sample["sample_idx"]
-print(
-    f"Visualizing Batch {batch_idx}, Sample {sample_idx} "
-    f"(Pixel Accuracy: {best_sample['pixel_acc']:.4f}, Instance AP: {best_sample['instance_ap']:.4f})"
+print(f"\n--> Visualizing sample prediction")
+visualize_point_cloud(
+    "Predicted Point Cloud", sample_data["points"], sample_data["semantic_pred"]
 )
-
-# Map predicted class indices to SemanticKITTI label IDs
-index_to_id = {v: k for k, v in SEMANTIC_KITTI_ID_TO_INDEX.items()}
-pred_label_ids = np.array([index_to_id.get(label, 0) for label in pred_labels])
-
-# Map label IDs to color indices
-color_indices = np.vectorize(SEMANTIC_KITTI_ID_TO_INDEX.get)(pred_label_ids, 0)
-
-# Get semantic colors
-semantic_colors = SEMANTIC_KITTI_COLORS[color_indices]  # [N, 3]
-
-# Create instance colors (random colors for each cluster)
-unique_clusters = np.unique(pred_clusters[pred_clusters != -1])
-instance_colors = np.zeros_like(semantic_colors)
-np.random.seed(42)
-cluster_colors = np.random.rand(len(unique_clusters), 3)
-for i, cluster_id in enumerate(unique_clusters):
-    instance_colors[pred_clusters == cluster_id] = cluster_colors[i]
-instance_colors[pred_clusters == -1] = [0, 0, 0]  # Noise points in black
-
-# Create point clouds
-semantic_pcd = o3d.geometry.PointCloud()
-semantic_pcd.points = o3d.utility.Vector3dVector(points)
-semantic_pcd.colors = o3d.utility.Vector3dVector(semantic_colors)
-
-instance_pcd = o3d.geometry.PointCloud()
-instance_pcd.points = o3d.utility.Vector3dVector(points)
-instance_pcd.colors = o3d.utility.Vector3dVector(instance_colors)
-
-# Visualize both semantic and instance predictions
-o3d.visualization.draw_geometries([semantic_pcd], window_name="Semantic Prediction")
-o3d.visualization.draw_geometries([instance_pcd], window_name="Instance Prediction")
+visualize_point_cloud(
+    "Ground Truth Point Cloud", sample_data["points"], sample_data["semantic_gt"]
+)

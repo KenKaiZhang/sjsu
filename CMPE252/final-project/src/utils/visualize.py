@@ -1,5 +1,6 @@
 import numpy as np
 import open3d as o3d
+
 from src.constants import SEMANTIC_KITTI_ID_TO_INDEX, SEMANTIC_KITTI_COLORS
 
 

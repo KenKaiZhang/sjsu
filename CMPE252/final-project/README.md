@@ -56,7 +56,20 @@ Run scripts in this order :
 2. **train.py**
 3. **evaluate.py**
 
-This will preprocess the data, train _SimpleModel_, and evaluate _SimpleModel_ performace. 
+This will preprocess the data, train _SimpleModel_, and evaluate _SimpleModel_ performance. 
 
 If there are other models you would like to test, simply add them to **src/models** and change which model is being trained in **scripts/train.py**
+
+## Model Performance
+
+Unfortunately, due to the time and computational limitations, I was unable to develop a more complex model better suited for this task. SimpleModel was created more as a demonstration of this pipeline, therefore more complex models should be considered. However, SimpleModel was trained and tested for semantic predictions with the following performance results :
+
+| | Highest | Median | Lowest |
+|-|-|-|-|
+|IoU|0.3588|0.1990|0.0879|
+|Pixel Accuracy|81%|54%|26%|
+
+In the future, I will be leveraging this development setup to experiment with more complex models with state-of-the-art techniques.
+
+
 
